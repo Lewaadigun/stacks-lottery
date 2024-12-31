@@ -140,3 +140,51 @@
     )
 )
 
+(define-public (emergency-stop)
+    ;; Admin-only function to stop the lottery in case of emergency.
+    (begin
+        (asserts! (is-eq tx-sender admin) err-only-admin)
+        (var-set lottery-active false)
+        (ok true)
+    )
+)
+
+;; Read-Only Functions for Accessing Lottery Information
+
+(define-read-only (get-ticket-cost)
+    ;; Retrieves the current ticket cost for participation in the lottery.
+    (ok (var-get ticket-cost))
+)
+
+(define-read-only (get-lottery-status)
+    ;; Retrieves the current status and details of the active lottery.
+    (ok {
+        is-active: (var-get lottery-active),
+        prize-pool: (var-get prize-pool),
+        participant-count: (var-get participant-count),
+        max-participants: (var-get max-participants)
+    })
+)
+
+(define-read-only (get-round-details (round-id uint))
+    ;; Retrieves historical details of a completed lottery round by round ID.
+    (match (map-get? round-history round-id)
+        round-data (ok round-data)
+        (err u404)
+    )
+)
+
+(define-read-only (get-player-tickets (player principal))
+    ;; Returns the number of tickets a specific player holds (1 if entered, 0 otherwise).
+    (default-to u0 (map-get? player-tickets player))
+)
+
+;; Initialize Contract State
+(begin
+    (var-set current-round-id u1)
+    (var-set ticket-cost u0)
+    (var-set max-participants u0)
+    (var-set lottery-active false)
+    (var-set prize-pool u0)
+    (var-set participant-count u0)
+)
