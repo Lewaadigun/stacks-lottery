@@ -76,3 +76,115 @@
         (ok true)
     )
 )
+
+;; Public Functions for Player Participation
+
+(define-public (buy-ticket)
+    ;; Allows a player to purchase a lottery ticket, transferring STX to the contract and recording participation.
+    (let
+        (
+            (player tx-sender)
+            (ticket-price (var-get ticket-cost))
+        )
+        (asserts! (var-get lottery-active) err-lottery-inactive)
+        (asserts! (< (var-get participant-count) (var-get max-participants)) err-max-participants-reached)
+        (asserts! (is-eq (get-player-tickets player) u0) err-already-participated)
+
+        ;; Transfer ticket price and record participation
+        (try! (stx-transfer? ticket-price player (as-contract tx-sender)))
+
+        ;; Register ticket purchase and update lottery state
+        (map-set player-tickets player u1)
+        (map-insert participants (var-get participant-count) (list player))
+        (var-set participant-count (+ (var-get participant-count) u1))
+        (var-set prize-pool (+ (var-get prize-pool) ticket-price))
+
+        (ok true)
+    )
+)
+
+;; Public Function to Select Winner
+
+(define-public (select-winner)
+    ;; Randomly selects a winner from participants and awards the accumulated prize pool.
+    (let
+        (
+            (player-list (unwrap! (map-get? participants (var-get current-round-id)) err-no-participants))
+            (winner-index (select-random-winner))
+            (winner-address (unwrap! (element-at player-list winner-index) err-no-participants))
+            (prize-amount (var-get prize-pool))
+        )
+        (asserts! (is-eq tx-sender admin) err-only-admin)
+        (asserts! (var-get lottery-active) err-lottery-inactive)
+        (asserts! (> (var-get participant-count) u0) err-no-participants)
+
+        ;; Transfer prize to winner and log round details
+        (try! (as-contract (stx-transfer? prize-amount (as-contract tx-sender) winner-address)))
+
+        (map-set round-history (var-get current-round-id)
+            {
+                winner: (some winner-address),
+                prize-awarded: prize-amount,
+                end-block: block-height,
+                participant-total: (var-get participant-count)
+            }
+        )
+
+        ;; Reset lottery state for next round
+        (var-set current-round-id (+ (var-get current-round-id) u1))
+        (var-set lottery-active false)
+        (var-set prize-pool u0)
+        (var-set participant-count u0)
+
+        (ok winner-address)
+    )
+)
+
+(define-public (emergency-stop)
+    ;; Admin-only function to stop the lottery in case of emergency.
+    (begin
+        (asserts! (is-eq tx-sender admin) err-only-admin)
+        (var-set lottery-active false)
+        (ok true)
+    )
+)
+
+;; Read-Only Functions for Accessing Lottery Information
+
+(define-read-only (get-ticket-cost)
+    ;; Retrieves the current ticket cost for participation in the lottery.
+    (ok (var-get ticket-cost))
+)
+
+(define-read-only (get-lottery-status)
+    ;; Retrieves the current status and details of the active lottery.
+    (ok {
+        is-active: (var-get lottery-active),
+        prize-pool: (var-get prize-pool),
+        participant-count: (var-get participant-count),
+        max-participants: (var-get max-participants)
+    })
+)
+
+(define-read-only (get-round-details (round-id uint))
+    ;; Retrieves historical details of a completed lottery round by round ID.
+    (match (map-get? round-history round-id)
+        round-data (ok round-data)
+        (err u404)
+    )
+)
+
+(define-read-only (get-player-tickets (player principal))
+    ;; Returns the number of tickets a specific player holds (1 if entered, 0 otherwise).
+    (default-to u0 (map-get? player-tickets player))
+)
+
+;; Initialize Contract State
+(begin
+    (var-set current-round-id u1)
+    (var-set ticket-cost u0)
+    (var-set max-participants u0)
+    (var-set lottery-active false)
+    (var-set prize-pool u0)
+    (var-set participant-count u0)
+)
